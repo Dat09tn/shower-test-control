@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Điều khiển Shower Test, đặt Q/T, test PWM 12-bit, theo dõi log và cập nhật firmware ESP32-S3 qua USB trực tiếp hoặc kết nối từ xa mã hóa.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' wss: ws://127.0.0.1:8765 ws://localhost:8765; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>ESP32 · Điều khiển Shower Test, USB Serial, Log & Firmware</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/mqtt.min.js" defer></script>
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+<header class="top"><div class="brand"><span class="mark">E</span><div><strong>ESP32 Shower Test</strong><span>USB SERIAL · REMOTE · LOG & FIRMWARE</span></div></div><div class="header-badges"><span id="usb-badge" class="badge">USB: Chưa kết nối</span><span id="connection-badge" class="badge">Chưa kết nối</span></div></header>
+<main>
+  <div class="intro"><p class="eyebrow">BẢNG ĐIỀU KHIỂN & GIÁM SÁT TOÀN DIỆN</p><h1>Điều khiển trực tiếp qua USB<br>hoặc từ xa qua Internet.</h1><p>Đặt lưu lượng Q / thời gian T, chạy Mode 1/2/3, test xung PWM 12-bit 1kHz (GPIO 14), xem log thời gian thực và nạp firmware OTA cho ESP32-S3.</p></div>
+
+  <!-- CHẾ ĐỘ KẾT NỐI TRỰC TIẾP USB (WEB SERIAL API) & PYTHON BRIDGE -->
+  <section class="card usb-card" aria-labelledby="usb-title">
+    <div class="usb-header">
+      <div>
+        <p class="eyebrow">KẾT NỐI CỤC BỘ QUA CÁP USB (COM PORT)</p>
+        <h2 id="usb-title">⚡ Chế độ 1: Kết nối trực tiếp USB (Web Serial API — Khuyên dùng tại máy)</h2>
+        <p>Cắm cáp USB từ mạch ESP32-S3 vào máy tính (mặc định <code>115200 baud</code>) để điều khiển và đọc log trực tiếp không cần mạng.</p>
+      </div>
+      <div class="usb-actions">
+        <select id="direct-baud" aria-label="Tốc độ Baud USB">
+          <option value="115200" selected>115200 baud (Chuẩn ESP32-S3)</option>
+          <option value="9600">9600 baud</option>
+          <option value="57600">57600 baud</option>
+          <option value="230400">230400 baud</option>
+        </select>
+        <button type="button" id="btn-direct-connect" class="usb-btn">🔌 Chọn Cổng USB &amp; Kết Nối</button>
+      </div>
+    </div>
+    <p id="direct-notice" class="subtle">Hỗ trợ Chrome, Edge, Cốc Cốc trên PC (qua GitHub Pages hoặc <code>Mo_Giao_Dien_Web.bat</code>).</p>
+    <div id="file-protocol-warning" class="warning-box" hidden>
+      <strong>⚠️ Trình duyệt chặn cổng USB trực tiếp khi mở bằng <code>file://</code></strong><br>
+      👉 <b>Cách 1 (Online):</b> Mở trực tiếp qua link GitHub Pages <code>https://dat09tn.github.io/shower-test-control/</code>.<br>
+      👉 <b>Cách 2 (Localhost):</b> Nhấp đúp chạy file <code>Mo_Giao_Dien_Web.bat</code> trong thư mục dự án.<br>
+      👉 <b>Cách 3 (Python Bridge):</b> Chạy <code>run_serial_bridge.bat</code> rồi mở mục Chế độ 2 bên dưới.
+    </div>
+
+    <details class="bridge-details">
+      <summary>🛠️ Dự phòng: Kết nối qua Cầu nối Python WebSocket (<code>run_serial_bridge.bat</code> — <code>ws://127.0.0.1:8765</code>)</summary>
+      <div class="bridge-controls">
+        <span id="bridge-ws-status" class="badge">WS: chưa kết nối</span>
+        <select id="bridge-port" aria-label="Cổng COM Bridge"></select>
+        <select id="bridge-baud" aria-label="Baudrate Bridge">
+          <option value="115200" selected>115200</option>
+          <option value="9600">9600</option>
+          <option value="57600">57600</option>
+        </select>
+        <button type="button" id="bridge-refresh" class="secondary">Làm mới cổng</button>
+        <button type="button" id="bridge-connect">Kết nối COM</button>
+        <button type="button" id="bridge-disconnect" class="secondary">Ngắt COM</button>
+        <span id="bridge-com-status" class="subtle">COM: chưa kết nối</span>
+      </div>
+    </details>
+  </section>
+
+  <!-- CHẾ ĐỘ KẾT NỐI TỪ XA QUA INTERNET (MQTT/WSS + CLIENT.JSON) -->
+  <section class="connect card" aria-labelledby="connect-title">
+    <div><p class="eyebrow">KẾT NỐI TỪ XA QUA INTERNET (MÃ HÓA AES-256-GCM)</p><h2 id="connect-title">🌐 Chế độ 2: Kết nối thiết bị từ xa (MQTT / OTA)</h2><p>Chọn file <code>client.json</code> đã ghép cặp với ESP32. Khóa chỉ được giữ trong bộ nhớ của trang đang mở.</p></div>
+    <div class="connect-actions"><label class="file-button">Chọn file ghép cặp<input id="config-file" type="file" accept=".json,application/json"></label><button id="connect" disabled>Kết nối</button><button id="disconnect" class="secondary" disabled>Ngắt</button></div>
+    <p id="pairing-label" class="subtle">Chưa chọn thiết bị.</p><p id="notice" role="status" aria-live="polite">Có thể kết nối qua USB trực tiếp ở trên hoặc chọn file ghép cặp <code>client.json</code> để điều khiển từ xa.</p>
+  </section>
+
+  <div class="stats"><div class="card"><span>THIẾT BỊ / KÊNH KẾT NỐI</span><strong id="device-label">—</strong></div><div class="card"><span>FIRMWARE HIỆN TẠI</span><strong id="firmware-label">—</strong></div><div class="card"><span>TRẠNG THÁI HỆ THỐNG</span><strong id="device-state">Chờ kết nối</strong></div></div>
+
+  <!-- BẢNG ĐIỀU KHIỂN CHÍNH: 3 MODE + Q/T -->
+  <section class="card device-controls" aria-labelledby="control-title">
+    <div class="panel-heading"><div><p class="eyebrow">ĐIỀU KHIỂN SHOWER TEST</p><h2 id="control-title">Chế độ chạy, lưu lượng và thời gian</h2></div><button id="control-stop" class="danger" disabled>Dừng bơm · X4/B4</button></div>
+    <p id="control-availability" class="subtle">Chờ kết nối thiết bị.</p>
+    <div class="live-values"><div><span>BƠM</span><strong id="pump-state">—</strong></div><div><span>LƯU LƯỢNG THỰC TẾ</span><strong id="flow-value">—</strong></div><div><span>THỜI GIAN CÒN LẠI</span><strong id="remaining-value">—</strong></div><div><span>PWM</span><strong id="pwm-value">—</strong></div><div><span>WI-FI ESP32</span><strong id="wifi-value">—</strong></div></div>
+    <div class="mode-grid">
+      <article class="mode-card" id="mode-card-1"><div class="mode-heading"><h3>Mode 1 <span>X1 / B1</span></h3><span id="mode-state-1" class="mode-badge">Chờ</span></div><form id="settings-1"><div class="parameter-fields"><label for="q-1">Q1 <span>L/h</span><input id="q-1" type="number" min="40" max="500" step="1" required disabled></label><label for="t-1">T1 <span>phút</span><input id="t-1" type="number" min="1" max="1440" step="1" required disabled></label></div><p id="saved-1" class="saved-values">Chưa có dữ liệu Q/T.</p><div class="mode-actions"><button type="submit" id="save-1" class="secondary" disabled>Lưu Q1 / T1</button><button type="button" id="start-1" disabled>Chạy Mode 1</button></div></form></article>
+      <article class="mode-card" id="mode-card-2"><div class="mode-heading"><h3>Mode 2 <span>X2 / B2</span></h3><span id="mode-state-2" class="mode-badge">Chờ</span></div><form id="settings-2"><div class="parameter-fields"><label for="q-2">Q2 <span>L/h</span><input id="q-2" type="number" min="40" max="500" step="1" required disabled></label><label for="t-2">T2 <span>phút</span><input id="t-2" type="number" min="1" max="1440" step="1" required disabled></label></div><p id="saved-2" class="saved-values">Chưa có dữ liệu Q/T.</p><div class="mode-actions"><button type="submit" id="save-2" class="secondary" disabled>Lưu Q2 / T2</button><button type="button" id="start-2" disabled>Chạy Mode 2</button></div></form></article>
+      <article class="mode-card" id="mode-card-3"><div class="mode-heading"><h3>Mode 3 <span>X3 / B3</span></h3><span id="mode-state-3" class="mode-badge">Chờ</span></div><form id="settings-3"><div class="parameter-fields"><label for="q-3">Q3 <span>L/h</span><input id="q-3" type="number" min="40" max="500" step="1" required disabled></label><label for="t-3">T3 <span>phút</span><input id="t-3" type="number" min="1" max="1440" step="1" required disabled></label></div><p id="saved-3" class="saved-values">Chưa có dữ liệu Q/T.</p><div class="mode-actions"><button type="submit" id="save-3" class="secondary" disabled>Lưu Q3 / T3</button><button type="button" id="start-3" disabled>Chạy Mode 3</button></div></form></article>
+    </div>
+    <div class="io-strip"><span class="key-state" id="key-1">X1: —</span><span class="key-state" id="key-2">X2: —</span><span class="key-state" id="key-3">X3: —</span><span class="key-state" id="key-4">X4: —</span><span>Y1 <strong id="y1">—</strong></span><span>Y2 <strong id="y2">—</strong></span><span>Bơm hồi Y3 <strong id="y3">—</strong></span></div>
+    <p id="control-notice" class="control-notice" role="status" aria-live="polite">Lưu Q/T trước khi chạy. Trạng thái chỉ đổi khi ESP32 gửi phản hồi.</p>
+    <p class="footnote">Q: 40–500 L/h · T: 1–1440 phút. Dừng bơm thực hiện chu trình dừng/xả như X4/B4 tại máy. Điều khiển qua mạng có thể trễ; dùng nút tại máy khi cần dừng ngay.</p>
+  </section>
+
+  <!-- BẢNG CÔNG CỤ SERIAL & TEST XUNG PWM 12-BIT THỦ CÔNG (GPIO 14) -->
+  <section class="card serial-tools-card" aria-labelledby="serial-tools-title">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">CÔNG CỤ TEST TRỰC TIẾP QUA CỔNG USB SERIAL</p>
+        <h2 id="serial-tools-title">🎛️ Test xung PWM 12-bit 1kHz (GPIO 14) &amp; Lệnh nhanh Serial</h2>
+      </div>
+      <div class="quick-serial-btns">
+        <button type="button" class="secondary" data-serial-cmd="status">🔄 Đọc trạng thái</button>
+        <button type="button" class="secondary" data-serial-cmd="ver">ℹ️ Phiên bản FW</button>
+        <button type="button" class="secondary" data-serial-cmd="diag">📊 Chẩn đoán (diag)</button>
+        <button type="button" class="secondary" data-serial-cmd="wifi">📶 Quét Wi-Fi</button>
+        <button type="button" class="secondary" data-serial-cmd="help">❓ Trợ giúp (help)</button>
+      </div>
+    </div>
+
+    <div class="pwm-test-grid">
+      <div class="pwm-box">
+        <div class="pwm-box-header">
+          <strong>Xung PWM 12-bit thủ công (GPIO 14 · 1000 Hz)</strong>
+          <span id="pwm-slider-label" class="mode-badge">Duty: 1000 / 4095 (24.4%)</span>
+        </div>
+        <div class="pwm-slider-row">
+          <input type="range" id="pwm-slider" min="0" max="4095" step="1" value="1000">
+          <input type="number" id="pwm-input" min="0" max="4095" step="1" value="1000" aria-label="Giá trị PWM 0 đến 4095">
+          <button type="button" id="btn-send-pwm">⚡ Phát xung</button>
+          <button type="button" id="btn-stop-pwm" class="danger">⏹ Tắt xung (0)</button>
+        </div>
+        <div class="pwm-presets">
+          <span>Chọn nhanh:</span>
+          <button type="button" class="secondary" data-serial-cmd="300">300 (~28 L/h)</button>
+          <button type="button" class="secondary" data-serial-cmd="867">867</button>
+          <button type="button" class="secondary" data-serial-cmd="1000">1000 (~216 L/h)</button>
+          <button type="button" class="secondary" data-serial-cmd="1500">1500</button>
+          <button type="button" class="secondary" data-serial-cmd="2000">2000</button>
+          <button type="button" class="secondary" data-serial-cmd="25%">25%</button>
+          <button type="button" class="secondary" data-serial-cmd="50%">50%</button>
+          <button type="button" class="secondary" data-serial-cmd="75%">75%</button>
+          <button type="button" class="secondary" data-serial-cmd="100%">100% (4095)</button>
+        </div>
+      </div>
+
+      <div class="serial-cmd-box">
+        <strong>Gửi lệnh Serial trực tiếp xuống ESP32-S3</strong>
+        <p class="subtle">Lệnh hỗ trợ: <code>1</code>, <code>2</code>, <code>3</code>, <code>stop</code>, <code>xung 1500</code>, <code>50%</code>, <code>set 1 120 60</code>, <code>status</code>, <code>diag</code>, <code>wifi</code>, <code>ver</code></p>
+        <div class="serial-input-row">
+          <input type="text" id="serial-custom-input" placeholder="Nhập lệnh Serial bất kỳ rồi nhấn Enter (VD: xung 1200, mode1, stop)...">
+          <button type="button" id="btn-send-custom">Gửi lệnh</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="workspace">
+    <section class="card log-card" aria-labelledby="log-title">
+      <div class="panel-heading"><div><p class="eyebrow">NHẬT KÝ TRỰC TIẾP (USB &amp; MQTT)</p><h2 id="log-title">Log từ ESP32</h2></div><span id="log-count" class="subtle">0 dòng</span></div>
+      <div class="toolbar"><button id="pause" class="secondary">Tạm dừng hiển thị</button><button id="download" class="secondary">Tải log</button><button id="clear" class="text-button">Xóa màn hình</button><label class="follow"><input type="checkbox" id="follow" checked> Cuộn theo log mới</label></div>
+      <pre id="logs" tabindex="0" aria-label="Nhật ký thiết bị">Log sẽ xuất hiện sau khi ESP32 kết nối (qua cổng USB hoặc qua mạng). Khi mở trang, bạn có thể nhận lại tối đa 80 dòng gần nhất còn trong bộ nhớ thiết bị.</pre>
+      <p class="footnote">Trang giữ tối đa 1.000 dòng trong phiên này. Tải log để lưu trước khi đóng trang.</p>
+    </section>
+    <section class="card upload-card" aria-labelledby="upload-title">
+      <p class="eyebrow">CẬP NHẬT TỪ XA</p><h2 id="upload-title">Đưa firmware mới lên ESP32</h2>
+      <p>Chọn <code>firmware.bin</code> của ứng dụng ESP32-S3. Thiết bị chỉ nhận cập nhật khi bơm, van và bơm hồi đã dừng.</p>
+      <label class="dropzone"><span class="upload-symbol">↑</span><strong>Chọn file .bin</strong><span>File ứng dụng · không dùng bootloader.bin hoặc merged.bin</span><input id="firmware-file" type="file" accept=".bin,application/octet-stream"></label>
+      <p id="file-label" class="subtle">Chưa chọn firmware.</p>
+      <button id="upload" class="wide" disabled>Cập nhật firmware</button>
+      <div class="progress-row"><progress id="progress" value="0" max="100" aria-label="Tiến độ cập nhật"></progress><span id="percent">0%</span></div>
+      <p id="upload-status" role="status" aria-live="polite">Chờ thiết bị và file firmware.</p>
+      <button id="cancel" class="secondary wide" disabled>Hủy lần cập nhật</button>
+      <div class="info-box">Giữ trang mở trong khi truyền. ESP32 kiểm tra SHA-256 và tính hợp lệ của firmware trước khi khởi động lại.</div>
+    </section>
+  </div>
+  <footer><span>Hỗ trợ kết nối kép: Trực tiếp qua USB (Web Serial / Python Bridge) &amp; Từ xa qua MQTT mã hóa AES-256-GCM.</span><span>GitHub Pages: Dat09tn</span></footer>
+</main>
+</body></html>
